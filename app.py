@@ -143,7 +143,6 @@ def has_tipo_cfe(root):
 
     return False
 
-
 # ====================================
 # CLASIFICADOR
 # ====================================
@@ -247,8 +246,6 @@ def classify_xml(xml_bytes, rut):
 
         if has_tipo_cfe(root):
 
-            # Si NO soy el emisor,
-            # asumir recibido
             if emisor != rut:
                 return "recibidos"
 
@@ -425,6 +422,12 @@ async def upload_zip(
         }
 
         # ====================================
+        # VALIDACIÓN RUT
+        # ====================================
+
+        rut_match_count = 0
+
+        # ====================================
         # PROCESAR XML
         # ====================================
 
@@ -447,14 +450,32 @@ async def upload_zip(
 
                         xml_bytes = source.read()
 
+                    # ====================================
+                    # CLASIFICAR
+                    # ====================================
+
                     category = classify_xml(
                         xml_bytes,
                         rut
                     )
 
+                    # ====================================
+                    # VALIDAR RUT
+                    # ====================================
+
+                    if category in [
+                        "emitidos",
+                        "sobres_emitidos"
+                    ]:
+
+                        rut_match_count += 1
+
                     final_name = original_name
 
-                    # Duplicados
+                    # ====================================
+                    # DUPLICADOS
+                    # ====================================
+
                     if (
                         final_name.lower()
                         in used_names[category]
@@ -484,6 +505,10 @@ async def upload_zip(
                             final_name.lower()
                         ] = 0
 
+                    # ====================================
+                    # GUARDAR XML
+                    # ====================================
+
                     zip_map[category].writestr(
                         final_name,
                         xml_bytes
@@ -493,6 +518,24 @@ async def upload_zip(
 
             for z in zip_map.values():
                 z.close()
+
+        # ====================================
+        # VALIDAR RUT FINAL
+        # ====================================
+
+        if rut_match_count == 0:
+
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error":
+                    (
+                        "El RUT ingresado no coincide "
+                        "con los documentos emitidos "
+                        "del ZIP"
+                    )
+                }
+            )
 
         # ====================================
         # ZIP FINAL

@@ -89,17 +89,111 @@
 
 const form = document.getElementById("uploadForm");
 
-form.addEventListener("submit", () => {
+form.addEventListener("submit", async (e) => {
 
-    document.getElementById("loading").style.display = "block";
+    e.preventDefault();
 
-    document.getElementById("submitBtn").disabled = true;
+    document.getElementById("loading").style.display =
+        "block";
+
+    document.getElementById("submitBtn").disabled =
+        true;
 
     document.getElementById("submitBtn").innerText =
         "Procesando...";
 
-    // Detener loading luego descarga
-    setTimeout(() => {
+    const formData = new FormData(form);
+
+    try {
+
+        const response = await fetch(
+            "/upload",
+            {
+                method: "POST",
+                body: formData
+            }
+        );
+
+        // ERROR BACKEND
+        if (!response.ok) {
+
+            const data = await response.json();
+
+            alert(
+                data.error ||
+                "Ocurrió un error procesando el ZIP"
+            );
+
+            return;
+        }
+
+        // DESCARGA
+        const blob = await response.blob();
+
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+
+        a.href = url;
+
+        const contentDisposition =
+            response.headers.get(
+                "Content-Disposition"
+            );
+
+        let filename = "resultado.zip";
+
+if (contentDisposition) {
+
+    // filename*=UTF-8''
+    let match = contentDisposition.match(
+        /filename\*=UTF-8''(.+)/
+    );
+
+    if (match && match[1]) {
+
+        filename = decodeURIComponent(
+            match[1]
+        );
+
+    } else {
+
+        // filename=""
+        match = contentDisposition.match(
+            /filename="?([^"]+)"?/
+        );
+
+        if (match && match[1]) {
+            filename = match[1];
+        }
+    }
+}
+
+if (!filename.toLowerCase().endsWith(".zip")) {
+    filename += ".zip";
+}
+
+        a.download = filename;
+
+        document.body.appendChild(a);
+
+        a.click();
+
+        a.remove();
+
+        window.URL.revokeObjectURL(url);
+
+    }
+
+    catch (err) {
+
+        alert(
+            "Error inesperado procesando el archivo"
+        );
+
+    }
+
+    finally {
 
         document.getElementById("loading").style.display =
             "none";
@@ -109,8 +203,8 @@ form.addEventListener("submit", () => {
 
         document.getElementById("submitBtn").innerText =
             "Procesar ZIP";
+    }
 
-    }, 8000);
 });
 
 </script>
