@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 import uuid
 import sys
+import xml.etree.ElementTree as ET
 
 # Compatibilidad con PyInstaller
 if getattr(sys, 'frozen', False):
@@ -31,6 +32,19 @@ templates = Jinja2Templates(
 MAX_FILE_SIZE_MB = 80
 ALLOWED_EXTENSION = ".zip"
 
+# Tipos CFE EMITIDOS
+TIPOS_EMITIDOS = {
+    "101",  # eFactura
+    "102",  # Nota de Crédito eFactura
+    "103",  # Nota de Débito eFactura
+    "111",  # eTicket
+    "112",  # Nota de Crédito eTicket
+    "113",  # Nota de Débito eTicket
+    "181",  # eRemito
+    "182",  # Nota Crédito eRemito
+    "183"   # Nota Débito eRemito
+}
+
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -40,13 +54,70 @@ async def home(request: Request):
     )
 
 
+def find_tipo_cfe(root):
+
+    for elem in root.iter():
+
+        tag = elem.tag.lower()
+
+        if tag.endswith("tipocfe"):
+
+            if elem.text:
+                return elem.text.strip()
+
+    return None
+
+
+def classify_xml(xml_bytes):
+
+    try:
+
+        xml_text = xml_bytes.decode(
+            "utf-8",
+            errors="ignore"
+        )
+
+        # Detectar sobres
+        if (
+            "EnvioCFE" in xml_text
+            or "Caratula" in xml_text
+        ):
+            return "sobres"
+
+        root = ET.fromstring(xml_bytes)
+
+        tipo_cfe = find_tipo_cfe(root)
+
+        # Emitidos
+        if tipo_cfe in TIPOS_EMITIDOS:
+            return "emitidos"
+
+        # Recibidos
+        if (
+            "acuse" in xml_text.lower()
+            or "recepcion" in xml_text.lower()
+            or "respuesta" in xml_text.lower()
+            or "rechazo" in xml_text.lower()
+        ):
+            return "recibidos"
+
+        # Si tiene estructura CFE pero no tipo conocido
+        if tipo_cfe:
+            return "emitidos"
+
+        return "otros"
+
+    except Exception:
+        return "otros"
+
+
 @app.post("/upload")
 async def upload_zip(
     rut: str = Form(...),
     file: UploadFile = File(...)
 ):
 
-    # Limpiar RUT
+    # Limpiar RUT para nombre archivo
     rut = ''.join(filter(str.isdigit, rut))
 
     if not rut:
@@ -55,7 +126,7 @@ async def upload_zip(
             content={"error": "El RUT ingresado no es válido"}
         )
 
-    # Validar extensión
+    # Validar ZIP
     if not file.filename.lower().endswith(ALLOWED_EXTENSION):
         return JSONResponse(
             status_code=400,
@@ -83,91 +154,162 @@ async def upload_zip(
                 }
             )
 
-        # Leer XMLs directamente desde el ZIP
+        # Buscar XMLs
         xml_entries = []
 
         try:
+
             with zipfile.ZipFile(input_zip_path, 'r') as zip_ref:
 
                 for file_info in zip_ref.infolist():
 
                     # Protección ZIP Slip
                     if ".." in file_info.filename:
+
                         return JSONResponse(
                             status_code=400,
                             content={"error": "ZIP inválido o inseguro"}
                         )
 
-                    # Detectar XMLs
                     if file_info.filename.lower().endswith('.xml'):
                         xml_entries.append(file_info)
 
         except zipfile.BadZipFile:
+
             return JSONResponse(
                 status_code=400,
                 content={"error": "El archivo ZIP está corrupto"}
             )
 
         if not xml_entries:
+
             return JSONResponse(
                 status_code=400,
                 content={"error": "No se encontraron archivos XML"}
             )
 
-        # Crear ZIP plano
-        output_zip_name = f"xml_flat_{uuid.uuid4().hex}.zip"
-        output_zip_path = temp_path / output_zip_name
+        # ZIPs internos
+        emitidos_path = temp_path / "EMITIDOS.zip"
+        recibidos_path = temp_path / "RECIBIDOS.zip"
+        sobres_path = temp_path / "SOBRES.zip"
+        otros_path = temp_path / "OTROS.zip"
 
-        used_names = {}
+        zip_map = {
+            "emitidos": zipfile.ZipFile(
+                emitidos_path,
+                'w',
+                zipfile.ZIP_DEFLATED
+            ),
+            "recibidos": zipfile.ZipFile(
+                recibidos_path,
+                'w',
+                zipfile.ZIP_DEFLATED
+            ),
+            "sobres": zipfile.ZipFile(
+                sobres_path,
+                'w',
+                zipfile.ZIP_DEFLATED
+            ),
+            "otros": zipfile.ZipFile(
+                otros_path,
+                'w',
+                zipfile.ZIP_DEFLATED
+            )
+        }
 
-        with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as output_zip:
+        used_names = {
+            "emitidos": {},
+            "recibidos": {},
+            "sobres": {},
+            "otros": {}
+        }
+
+        try:
 
             with zipfile.ZipFile(input_zip_path, 'r') as input_zip:
 
                 for xml_file in xml_entries:
 
-                    original_name = Path(xml_file.filename).name
+                    original_name = Path(
+                        xml_file.filename
+                    ).name
+
+                    # Leer XML completo
+                    with input_zip.open(xml_file) as source:
+                        xml_bytes = source.read()
+
+                    # Clasificar
+                    category = classify_xml(xml_bytes)
+
                     final_name = original_name
 
-                    # Manejo de nombres duplicados
-                    if final_name.lower() in used_names:
+                    # Manejo duplicados
+                    if final_name.lower() in used_names[category]:
 
-                        used_names[final_name.lower()] += 1
+                        used_names[category][final_name.lower()] += 1
 
                         stem = Path(final_name).stem
                         suffix = Path(final_name).suffix
 
-                        final_name = f"{stem}_{used_names[final_name.lower()]}{suffix}"
+                        final_name = (
+                            f"{stem}_"
+                            f"{used_names[category][final_name.lower()]}"
+                            f"{suffix}"
+                        )
 
                     else:
-                        used_names[final_name.lower()] = 0
 
-                    # Streaming interno por bloques
-                    with input_zip.open(xml_file) as source:
+                        used_names[category][final_name.lower()] = 0
 
-                        with output_zip.open(final_name, 'w') as target:
+                    # Guardar XML
+                    zip_map[category].writestr(
+                        final_name,
+                        xml_bytes
+                    )
 
-                            while True:
+        finally:
 
-                                chunk = source.read(1024 * 64)
+            for z in zip_map.values():
+                z.close()
 
-                                if not chunk:
-                                    break
+        # ZIP final contenedor
+        final_zip_name = f"RESULTADO-{rut}.zip"
+        final_zip_path = temp_path / final_zip_name
 
-                                target.write(chunk)
+        with zipfile.ZipFile(
+            final_zip_path,
+            'w',
+            zipfile.ZIP_DEFLATED
+        ) as final_zip:
+
+            for internal_zip in [
+                emitidos_path,
+                recibidos_path,
+                sobres_path,
+                otros_path
+            ]:
+
+                if internal_zip.exists():
+
+                    final_zip.write(
+                        internal_zip,
+                        arcname=internal_zip.name
+                    )
 
         # Carpeta salida
         final_output_dir = BASE_DIR / "generated"
         final_output_dir.mkdir(exist_ok=True)
 
-        final_output_path = final_output_dir / output_zip_name
+        final_output_path = final_output_dir / final_zip_name
 
-        shutil.copy(output_zip_path, final_output_path)
+        shutil.copy(
+            final_zip_path,
+            final_output_path
+        )
 
-    # Descargar ZIP final
     return FileResponse(
         path=final_output_path,
-        filename=f"CFE-{rut}.zip",
+        filename=final_zip_name,
         media_type='application/zip'
     )
 

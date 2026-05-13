@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Extractor XML</title>
+    <title>XML Flatten ZIP Extractor</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -12,35 +12,91 @@
 
     <h1>Extractor XML</h1>
 
-    <p>
-        Subí un archivo ZIP y el sistema devolverá un ZIP plano
-        con todos los XML encontrados.
-    </p>
-
-    <form action="/upload" method="post" enctype="multipart/form-data">
+    <form
+        id="uploadForm"
+        action="/upload"
+        method="post"
+        enctype="multipart/form-data"
+    >
 
         <label for="rut">RUT:</label>
-        <input type="text" name="rut" id="rut" required>
+
+        <input
+            type="text"
+            name="rut"
+            id="rut"
+            required
+        >
 
         <br><br>
 
-        <input type="file" name="file" accept=".zip" required>
+        <label for="file">Archivo ZIP:</label>
+
+        <input
+            type="file"
+            name="file"
+            id="file"
+            accept=".zip"
+            required
+        >
 
         <br><br>
 
-        <button type="submit">Procesar ZIP</button>
+        <button
+            type="submit"
+            id="submitBtn"
+        >
+            Procesar ZIP
+        </button>
 
     </form>
 
+    <div
+        id="loading"
+        style="display:none;"
+    >
+
+        <div class="spinner"></div>
+
+        <p>
+            Procesando archivos...
+            Esto puede tardar varios segundos.
+        </p>
+
+    </div>
+
     <div class="info">
+
         <h3>
-            Ten en cuenta que todo archivo XML del ZIP cargado,
-            quedará junto en un solo ZIP nuevo, de ser necesario
-            debes separar los CFE antes de subir el archivo.
+            El sistema detecta automáticamente:
         </h3>
+
+        <ul>
+            <li>CFE emitidos</li>
+            <li>CFE recibidos</li>
+            <li>Sobres</li>
+            <li>Otros XML</li>
+        </ul>
+
     </div>
 
 </div>
+
+<script>
+
+document
+    .getElementById("uploadForm")
+    .addEventListener("submit", function() {
+
+        document.getElementById("loading").style.display = "block";
+
+        document.getElementById("submitBtn").disabled = true;
+
+        document.getElementById("submitBtn").innerText =
+            "Procesando...";
+    });
+
+</script>
 
 </body>
 </html>
