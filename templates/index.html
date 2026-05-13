@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extractor XML</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="container">
+
+    <h1>Extractor XML</h1>
+
+    <p>
+        Subí un archivo ZIP y el sistema devolverá un ZIP plano
+        con todos los XML encontrados.
+    </p>
+
+    <form action="/upload" method="post" enctype="multipart/form-data">
+
+        <label for="rut">RUT:</label>
+        <input type="text" name="rut" id="rut" required>
+
+        <br><br>
+
+        <input type="file" name="file" accept=".zip" required>
+
+        <br><br>
+
+        <button type="submit">Procesar ZIP</button>
+
+    </form>
+
+    <div class="info">
+        <h3>
+            Ten en cuenta que todo archivo XML del ZIP cargado,
+            quedará junto en un solo ZIP nuevo, de ser necesario
+            debes separar los CFE antes de subir el archivo.
+        </h3>
+    </div>
+
+</div>
+
+</body>
+</html>
