@@ -28,7 +28,7 @@ templates = Jinja2Templates(
     directory=str(BASE_DIR / "templates")
 )
 
-MAX_FILE_SIZE_MB = 200
+MAX_FILE_SIZE_MB = 80
 ALLOWED_EXTENSION = ".zip"
 
 
@@ -142,12 +142,19 @@ async def upload_zip(
                     else:
                         used_names[final_name.lower()] = 0
 
-                    # Leer XML directamente desde ZIP original
+                    # Streaming interno por bloques
                     with input_zip.open(xml_file) as source:
-                        content = source.read()
 
-                    # Escribir directamente al ZIP final
-                    output_zip.writestr(final_name, content)
+                        with output_zip.open(final_name, 'w') as target:
+
+                            while True:
+
+                                chunk = source.read(1024 * 64)
+
+                                if not chunk:
+                                    break
+
+                                target.write(chunk)
 
         # Carpeta salida
         final_output_dir = BASE_DIR / "generated"
