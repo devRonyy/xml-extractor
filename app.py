@@ -297,21 +297,11 @@ async def upload_zip(
                     )
 
         # Carpeta salida
-        final_output_dir = BASE_DIR / "generated"
-        final_output_dir.mkdir(exist_ok=True)
-
-        final_output_path = final_output_dir / final_zip_name
-
-        shutil.copy(
-            final_zip_path,
-            final_output_path
-        )
-
-    return FileResponse(
-        path=final_output_path,
-        filename=final_zip_name,
-        media_type='application/zip'
-    )
+        return FileResponse(
+    path=final_zip_path,
+    filename=final_zip_name,
+    media_type='application/zip'
+)
 
 
 @app.get("/health")
