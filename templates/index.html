@@ -12,6 +12,19 @@
 
     <h1>Extractor XML</h1>
 
+    <h3>Asegúrate de estar colocando el RUT correcto del cliente.</h3>
+
+    <p>
+        El sistema clasificará automáticamente:
+    </p>
+
+    <ul>
+        <li>EMITIDOS</li>
+        <li>RECIBIDOS</li>
+        <li>SOBRES</li>
+        <li>OTROS</li>
+    </ul>
+
     <form
         id="uploadForm"
         action="/upload"
@@ -19,7 +32,9 @@
         enctype="multipart/form-data"
     >
 
-        <label for="rut">RUT:</label>
+        <label for="rut">
+            RUT empresa:
+        </label>
 
         <input
             type="text"
@@ -30,7 +45,9 @@
 
         <br><br>
 
-        <label for="file">Archivo ZIP:</label>
+        <label for="file">
+            Archivo ZIP:
+        </label>
 
         <input
             type="file"
@@ -60,23 +77,7 @@
 
         <p>
             Procesando archivos...
-            Esto puede tardar varios segundos.
         </p>
-
-    </div>
-
-    <div class="info">
-
-        <h3>
-            El sistema detecta automáticamente:
-        </h3>
-
-        <ul>
-            <li>CFE emitidos</li>
-            <li>CFE recibidos</li>
-            <li>Sobres</li>
-            <li>Otros XML</li>
-        </ul>
 
     </div>
 
@@ -84,17 +85,31 @@
 
 <script>
 
-document
-    .getElementById("uploadForm")
-    .addEventListener("submit", function() {
+const form = document.getElementById("uploadForm");
 
-        document.getElementById("loading").style.display = "block";
+form.addEventListener("submit", () => {
 
-        document.getElementById("submitBtn").disabled = true;
+    document.getElementById("loading").style.display = "block";
+
+    document.getElementById("submitBtn").disabled = true;
+
+    document.getElementById("submitBtn").innerText =
+        "Procesando...";
+
+    // Detener loading luego descarga
+    setTimeout(() => {
+
+        document.getElementById("loading").style.display =
+            "none";
+
+        document.getElementById("submitBtn").disabled =
+            false;
 
         document.getElementById("submitBtn").innerText =
-            "Procesando...";
-    });
+            "Procesar ZIP";
+
+    }, 8000);
+});
 
 </script>
 

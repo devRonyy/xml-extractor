@@ -6,22 +6,33 @@ from fastapi.staticfiles import StaticFiles
 import zipfile
 import tempfile
 import shutil
+from tempfile import NamedTemporaryFile
 from pathlib import Path
-import uuid
 import sys
 import xml.etree.ElementTree as ET
 
-# Compatibilidad con PyInstaller
+# ====================================
+# PYINSTALLER
+# ====================================
+
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="XML Flatten ZIP Extractor")
+# ====================================
+# APP
+# ====================================
+
+app = FastAPI(
+    title="XML Flatten ZIP Extractor"
+)
 
 app.mount(
     "/static",
-    StaticFiles(directory=str(BASE_DIR / "static")),
+    StaticFiles(
+        directory=str(BASE_DIR / "static")
+    ),
     name="static"
 )
 
@@ -32,84 +43,227 @@ templates = Jinja2Templates(
 MAX_FILE_SIZE_MB = 80
 ALLOWED_EXTENSION = ".zip"
 
-# Tipos CFE EMITIDOS
-TIPOS_EMITIDOS = {
-    "101",  # eFactura
-    "102",  # Nota de Crédito eFactura
-    "103",  # Nota de Débito eFactura
-    "111",  # eTicket
-    "112",  # Nota de Crédito eTicket
-    "113",  # Nota de Débito eTicket
-    "181",  # eRemito
-    "182",  # Nota Crédito eRemito
-    "183"   # Nota Débito eRemito
-}
-
+# ====================================
+# HOME
+# ====================================
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
+
     return templates.TemplateResponse(
         request=request,
         name="index.html"
     )
 
+# ====================================
+# HELPERS
+# ====================================
 
-def find_tipo_cfe(root):
+def normalize_rut(value):
+
+    if not value:
+        return ""
+
+    value = ''.join(
+        filter(str.isdigit, value)
+    )
+
+    return value.lstrip("0")
+
+
+def clean_tag(tag):
+
+    tag = tag.lower()
+
+    tag = tag.split("}")[-1]
+
+    if ":" in tag:
+        tag = tag.split(":")[-1]
+
+    return tag
+
+
+def extract_possible_ruts(root):
+
+    found = []
+
+    valid_tags = {
+        "rucemisor",
+        "rutemisor",
+        "rucrecep",
+        "rutrecep",
+        "docrecep",
+        "rutreceptor"
+    }
 
     for elem in root.iter():
 
-        tag = elem.tag.lower()
+        try:
 
-        if tag.endswith("tipocfe"):
+            tag = clean_tag(elem.tag)
 
-            if elem.text:
-                return elem.text.strip()
+            if tag in valid_tags:
 
-    return None
+                if elem.text:
+
+                    normalized = normalize_rut(
+                        elem.text
+                    )
+
+                    if normalized:
+
+                        found.append(
+                            (
+                                tag,
+                                normalized
+                            )
+                        )
+
+        except Exception:
+            pass
+
+    return found
 
 
-def classify_xml(xml_bytes):
+def has_tipo_cfe(root):
+
+    for elem in root.iter():
+
+        try:
+
+            tag = clean_tag(elem.tag)
+
+            if tag == "tipocfe":
+
+                if elem.text:
+                    return True
+
+        except Exception:
+            pass
+
+    return False
+
+
+# ====================================
+# CLASIFICADOR
+# ====================================
+
+def classify_xml(xml_bytes, rut):
 
     try:
+
+        rut = normalize_rut(rut)
 
         xml_text = xml_bytes.decode(
             "utf-8",
             errors="ignore"
         )
 
-        # Detectar sobres
+        lower_xml = xml_text.lower()
+
+        # ====================================
+        # SOAP DGI
+        # ====================================
+
         if (
-            "EnvioCFE" in xml_text
-            or "Caratula" in xml_text
+            "efacrecepcionsobre" in lower_xml
+            or "<envelope" in lower_xml
+            or "schemas.xmlsoap.org" in lower_xml
         ):
-            return "sobres"
+            return "soap_dgi"
+
+        # ====================================
+        # DETECTAR SOBRES
+        # ====================================
+
+        is_sobre = (
+            "enviocfe_entreempresas" in lower_xml
+            or "<enviocfe" in lower_xml
+            or "<caratula" in lower_xml
+            or "cfe_adenda" in lower_xml
+        )
+
+        # ====================================
+        # PARSE XML
+        # ====================================
 
         root = ET.fromstring(xml_bytes)
 
-        tipo_cfe = find_tipo_cfe(root)
+        ruts = extract_possible_ruts(root)
 
-        # Emitidos
-        if tipo_cfe in TIPOS_EMITIDOS:
+        emisor = None
+        receptor = None
+
+        for tag_name, value in ruts:
+
+            # EMISOR
+            if tag_name in [
+                "rucemisor",
+                "rutemisor"
+            ]:
+                emisor = value
+
+            # RECEPTOR
+            if tag_name in [
+                "rucrecep",
+                "rutrecep",
+                "docrecep",
+                "rutreceptor"
+            ]:
+                receptor = value
+
+        # ====================================
+        # SOBRES
+        # ====================================
+
+        if is_sobre:
+
+            # SOBRE EMITIDO
+            if emisor == rut:
+                return "sobres_emitidos"
+
+            # SOBRE RECIBIDO
+            if receptor == rut:
+                return "sobres_recibidos"
+
+            # Fallback
+            return "sobres_recibidos"
+
+        # ====================================
+        # CFE DIRECTOS
+        # ====================================
+
+        # EMITIDOS
+        if emisor == rut:
             return "emitidos"
 
-        # Recibidos
-        if (
-            "acuse" in xml_text.lower()
-            or "recepcion" in xml_text.lower()
-            or "respuesta" in xml_text.lower()
-            or "rechazo" in xml_text.lower()
-        ):
+        # RECIBIDOS
+        if receptor == rut:
             return "recibidos"
 
-        # Si tiene estructura CFE pero no tipo conocido
-        if tipo_cfe:
-            return "emitidos"
+        # ====================================
+        # FALLBACK CFE
+        # ====================================
+
+        if has_tipo_cfe(root):
+
+            # Si NO soy el emisor,
+            # asumir recibido
+            if emisor != rut:
+                return "recibidos"
+
+        # ====================================
+        # OTROS
+        # ====================================
 
         return "otros"
 
     except Exception:
         return "otros"
 
+# ====================================
+# UPLOAD
+# ====================================
 
 @app.post("/upload")
 async def upload_zip(
@@ -117,20 +271,28 @@ async def upload_zip(
     file: UploadFile = File(...)
 ):
 
-    # Limpiar RUT para nombre archivo
-    rut = ''.join(filter(str.isdigit, rut))
+    rut = normalize_rut(rut)
 
     if not rut:
+
         return JSONResponse(
             status_code=400,
-            content={"error": "El RUT ingresado no es válido"}
+            content={
+                "error":
+                "El RUT ingresado no es válido"
+            }
         )
 
-    # Validar ZIP
-    if not file.filename.lower().endswith(ALLOWED_EXTENSION):
+    if not file.filename.lower().endswith(
+        ALLOWED_EXTENSION
+    ):
+
         return JSONResponse(
             status_code=400,
-            content={"error": "Solo se permiten archivos ZIP"}
+            content={
+                "error":
+                "Solo se permiten ZIP"
+            }
         )
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -139,94 +301,139 @@ async def upload_zip(
 
         input_zip_path = temp_path / "input.zip"
 
-        # Guardar ZIP subido
-        with open(input_zip_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # ====================================
+        # GUARDAR ZIP
+        # ====================================
 
-        # Validar tamaño
-        size_mb = input_zip_path.stat().st_size / (1024 * 1024)
+        with open(input_zip_path, "wb") as buffer:
+
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+
+        # ====================================
+        # VALIDAR TAMAÑO
+        # ====================================
+
+        size_mb = (
+            input_zip_path.stat().st_size
+            / (1024 * 1024)
+        )
 
         if size_mb > MAX_FILE_SIZE_MB:
+
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": f"El archivo supera el límite de {MAX_FILE_SIZE_MB} MB"
+                    "error":
+                    f"Máximo {MAX_FILE_SIZE_MB} MB"
                 }
             )
 
-        # Buscar XMLs
+        # ====================================
+        # LEER ZIP
+        # ====================================
+
         xml_entries = []
 
         try:
 
-            with zipfile.ZipFile(input_zip_path, 'r') as zip_ref:
+            with zipfile.ZipFile(
+                input_zip_path,
+                'r'
+            ) as zip_ref:
 
                 for file_info in zip_ref.infolist():
 
-                    # Protección ZIP Slip
+                    # ZIP Slip protection
                     if ".." in file_info.filename:
 
                         return JSONResponse(
                             status_code=400,
-                            content={"error": "ZIP inválido o inseguro"}
+                            content={
+                                "error":
+                                "ZIP inseguro"
+                            }
                         )
 
-                    if file_info.filename.lower().endswith('.xml'):
-                        xml_entries.append(file_info)
+                    if file_info.filename.lower().endswith(
+                        '.xml'
+                    ):
+
+                        xml_entries.append(
+                            file_info
+                        )
 
         except zipfile.BadZipFile:
 
             return JSONResponse(
                 status_code=400,
-                content={"error": "El archivo ZIP está corrupto"}
+                content={
+                    "error":
+                    "ZIP corrupto"
+                }
             )
 
         if not xml_entries:
 
             return JSONResponse(
                 status_code=400,
-                content={"error": "No se encontraron archivos XML"}
+                content={
+                    "error":
+                    "No se encontraron XML"
+                }
             )
 
-        # ZIPs internos
-        emitidos_path = temp_path / "EMITIDOS.zip"
-        recibidos_path = temp_path / "RECIBIDOS.zip"
-        sobres_path = temp_path / "SOBRES.zip"
-        otros_path = temp_path / "OTROS.zip"
+        # ====================================
+        # CATEGORÍAS
+        # ====================================
 
-        zip_map = {
-            "emitidos": zipfile.ZipFile(
-                emitidos_path,
-                'w',
-                zipfile.ZIP_DEFLATED
-            ),
-            "recibidos": zipfile.ZipFile(
-                recibidos_path,
-                'w',
-                zipfile.ZIP_DEFLATED
-            ),
-            "sobres": zipfile.ZipFile(
-                sobres_path,
-                'w',
-                zipfile.ZIP_DEFLATED
-            ),
-            "otros": zipfile.ZipFile(
-                otros_path,
-                'w',
-                zipfile.ZIP_DEFLATED
-            )
+        categories = {
+            "emitidos":
+                temp_path / "EMITIDOS.zip",
+
+            "recibidos":
+                temp_path / "RECIBIDOS.zip",
+
+            "sobres_emitidos":
+                temp_path / "SOBRES_EMITIDOS.zip",
+
+            "sobres_recibidos":
+                temp_path / "SOBRES_RECIBIDOS.zip",
+
+            "soap_dgi":
+                temp_path / "SOAP_DGI.zip",
+
+            "otros":
+                temp_path / "OTROS.zip"
         }
+
+        zip_map = {}
+
+        for key, path in categories.items():
+
+            zip_map[key] = zipfile.ZipFile(
+                path,
+                'w',
+                zipfile.ZIP_DEFLATED
+            )
 
         used_names = {
-            "emitidos": {},
-            "recibidos": {},
-            "sobres": {},
-            "otros": {}
+            key: {}
+            for key in categories.keys()
         }
+
+        # ====================================
+        # PROCESAR XML
+        # ====================================
 
         try:
 
-            with zipfile.ZipFile(input_zip_path, 'r') as input_zip:
+            with zipfile.ZipFile(
+                input_zip_path,
+                'r'
+            ) as input_zip:
 
                 for xml_file in xml_entries:
 
@@ -234,22 +441,36 @@ async def upload_zip(
                         xml_file.filename
                     ).name
 
-                    # Leer XML completo
-                    with input_zip.open(xml_file) as source:
+                    with input_zip.open(
+                        xml_file
+                    ) as source:
+
                         xml_bytes = source.read()
 
-                    # Clasificar
-                    category = classify_xml(xml_bytes)
+                    category = classify_xml(
+                        xml_bytes,
+                        rut
+                    )
 
                     final_name = original_name
 
-                    # Manejo duplicados
-                    if final_name.lower() in used_names[category]:
+                    # Duplicados
+                    if (
+                        final_name.lower()
+                        in used_names[category]
+                    ):
 
-                        used_names[category][final_name.lower()] += 1
+                        used_names[category][
+                            final_name.lower()
+                        ] += 1
 
-                        stem = Path(final_name).stem
-                        suffix = Path(final_name).suffix
+                        stem = Path(
+                            final_name
+                        ).stem
+
+                        suffix = Path(
+                            final_name
+                        ).suffix
 
                         final_name = (
                             f"{stem}_"
@@ -259,9 +480,10 @@ async def upload_zip(
 
                     else:
 
-                        used_names[category][final_name.lower()] = 0
+                        used_names[category][
+                            final_name.lower()
+                        ] = 0
 
-                    # Guardar XML
                     zip_map[category].writestr(
                         final_name,
                         xml_bytes
@@ -272,9 +494,24 @@ async def upload_zip(
             for z in zip_map.values():
                 z.close()
 
-        # ZIP final contenedor
-        final_zip_name = f"RESULTADO-{rut}.zip"
-        final_zip_path = temp_path / final_zip_name
+        # ====================================
+        # ZIP FINAL
+        # ====================================
+
+        final_zip_name = (
+            f"RESULTADO-{rut}.zip"
+        )
+
+        temp_output = NamedTemporaryFile(
+            delete=False,
+            suffix=".zip"
+        )
+
+        final_zip_path = Path(
+            temp_output.name
+        )
+
+        temp_output.close()
 
         with zipfile.ZipFile(
             final_zip_path,
@@ -282,30 +519,28 @@ async def upload_zip(
             zipfile.ZIP_DEFLATED
         ) as final_zip:
 
-            for internal_zip in [
-                emitidos_path,
-                recibidos_path,
-                sobres_path,
-                otros_path
-            ]:
+            for path in categories.values():
 
-                if internal_zip.exists():
+                if path.exists():
 
                     final_zip.write(
-                        internal_zip,
-                        arcname=internal_zip.name
+                        path,
+                        arcname=path.name
                     )
 
-        # Carpeta salida
-        return FileResponse(
-    path=final_zip_path,
-    filename=final_zip_name,
-    media_type='application/zip'
-)
+    return FileResponse(
+        path=final_zip_path,
+        filename=final_zip_name,
+        media_type='application/zip'
+    )
 
+# ====================================
+# HEALTH
+# ====================================
 
 @app.get("/health")
 async def health():
+
     return {
         "status": "ok"
     }
