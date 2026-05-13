@@ -9,7 +9,6 @@ import shutil
 from pathlib import Path
 import uuid
 import sys
-import os
 
 # Compatibilidad con PyInstaller
 if getattr(sys, 'frozen', False):
@@ -17,24 +16,7 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Extractor de XML")
-
-app.mount(
-    "/static",
-    StaticFiles(directory=str(BASE_DIR / "static")),
-    name="static"
-)
-
-templates = Jinja2Templates(
-    directory=str(BASE_DIR / "templates")
-)
-
-MAX_FILE_SIZE_MB = 200
-ALLOWED_EXTENSION = ".zip"
-
-app = FastAPI(title="Extractor de XML")
-
-BASE_DIR = Path(__file__).resolve().parent
+app = FastAPI(title="XML Flatten ZIP Extractor")
 
 app.mount(
     "/static",
@@ -101,25 +83,24 @@ async def upload_zip(
                 }
             )
 
-        extract_dir = temp_path / "extracted"
-        extract_dir.mkdir(parents=True, exist_ok=True)
+        # Leer XMLs directamente desde el ZIP
+        xml_entries = []
 
-        # Extraer ZIP de forma segura
         try:
             with zipfile.ZipFile(input_zip_path, 'r') as zip_ref:
 
-                for member in zip_ref.infolist():
-
-                    member_path = extract_dir / member.filename
+                for file_info in zip_ref.infolist():
 
                     # Protección ZIP Slip
-                    if not str(member_path.resolve()).startswith(str(extract_dir.resolve())):
+                    if ".." in file_info.filename:
                         return JSONResponse(
                             status_code=400,
                             content={"error": "ZIP inválido o inseguro"}
                         )
 
-                zip_ref.extractall(extract_dir)
+                    # Detectar XMLs
+                    if file_info.filename.lower().endswith('.xml'):
+                        xml_entries.append(file_info)
 
         except zipfile.BadZipFile:
             return JSONResponse(
@@ -127,14 +108,7 @@ async def upload_zip(
                 content={"error": "El archivo ZIP está corrupto"}
             )
 
-        # Buscar XMLs recursivamente
-        xml_files = []
-
-        for path in extract_dir.rglob('*'):
-            if path.is_file() and path.suffix.lower() == '.xml':
-                xml_files.append(path)
-
-        if not xml_files:
+        if not xml_entries:
             return JSONResponse(
                 status_code=400,
                 content={"error": "No se encontraron archivos XML"}
@@ -148,30 +122,34 @@ async def upload_zip(
 
         with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as output_zip:
 
-            for xml_file in xml_files:
+            with zipfile.ZipFile(input_zip_path, 'r') as input_zip:
 
-                original_name = xml_file.name
-                final_name = original_name
+                for xml_file in xml_entries:
 
-                # Manejo de nombres duplicados
-                if final_name.lower() in used_names:
+                    original_name = Path(xml_file.filename).name
+                    final_name = original_name
 
-                    used_names[final_name.lower()] += 1
+                    # Manejo de nombres duplicados
+                    if final_name.lower() in used_names:
 
-                    stem = xml_file.stem
-                    suffix = xml_file.suffix
+                        used_names[final_name.lower()] += 1
 
-                    final_name = f"{stem}_{used_names[final_name.lower()]}{suffix}"
+                        stem = Path(final_name).stem
+                        suffix = Path(final_name).suffix
 
-                else:
-                    used_names[final_name.lower()] = 0
+                        final_name = f"{stem}_{used_names[final_name.lower()]}{suffix}"
 
-                output_zip.write(
-                    xml_file,
-                    arcname=final_name
-                )
+                    else:
+                        used_names[final_name.lower()] = 0
 
-        # Carpeta de salida final
+                    # Leer XML directamente desde ZIP original
+                    with input_zip.open(xml_file) as source:
+                        content = source.read()
+
+                    # Escribir directamente al ZIP final
+                    output_zip.writestr(final_name, content)
+
+        # Carpeta salida
         final_output_dir = BASE_DIR / "generated"
         final_output_dir.mkdir(exist_ok=True)
 
