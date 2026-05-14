@@ -159,6 +159,15 @@ def classify_xml(xml_bytes, rut):
         )
 
         lower_xml = xml_text.lower()
+        
+        # ====================================
+        # REPORTES DGI
+        # ====================================
+
+        if "<reporte" in lower_xml:
+            return "otros"                
+        
+        
 
         # ====================================
         # SOAP DGI
@@ -174,12 +183,10 @@ def classify_xml(xml_bytes, rut):
         # ====================================
         # DETECTAR SOBRES
         # ====================================
-
         is_sobre = (
             "enviocfe_entreempresas" in lower_xml
             or "<enviocfe" in lower_xml
             or "<caratula" in lower_xml
-            or "cfe_adenda" in lower_xml
         )
 
         # ====================================
@@ -265,6 +272,7 @@ def classify_xml(xml_bytes, rut):
 @app.post("/upload")
 async def upload_zip(
     rut: str = Form(...),
+    password: str = Form(""),
     file: UploadFile = File(...)
 ):
 
@@ -444,9 +452,28 @@ async def upload_zip(
                         xml_file.filename
                     ).name
 
-                    with input_zip.open(
-                        xml_file
-                    ) as source:
+                    try:
+
+                        with input_zip.open(
+                            xml_file,
+                            pwd=password.encode() if password else None
+                        ) as source:
+
+                            xml_bytes = source.read()
+
+                    except RuntimeError:
+
+                        return JSONResponse(
+                            status_code=400,
+                            content={
+                                "error":
+                                (
+                                    "El ZIP está protegido "
+                                    "con contraseña incorrecta "
+                                    "o no proporcionada"
+                                )
+                            }
+                    )
 
                         xml_bytes = source.read()
 
@@ -455,19 +482,24 @@ async def upload_zip(
                     # ====================================
 
                     category = classify_xml(
+                        
                         xml_bytes,
                         rut
                     )
+                    
 
                     # ====================================
                     # VALIDAR RUT
                     # ====================================
+                    
+                                        
 
                     if category in [
                         "emitidos",
-                        "sobres_emitidos"
+                        "recibidos",
+                        "sobres_emitidos",
+                        "sobres_recibidos"
                     ]:
-
                         rut_match_count += 1
 
                     final_name = original_name
