@@ -8,6 +8,7 @@ import tempfile
 import shutil
 from tempfile import NamedTemporaryFile
 from pathlib import Path
+from io import BytesIO
 import sys
 import xml.etree.ElementTree as ET
 
@@ -41,6 +42,7 @@ templates = Jinja2Templates(
 )
 
 MAX_FILE_SIZE_MB = 80
+MAX_ZIP_DEPTH = 5
 ALLOWED_EXTENSION = ".zip"
 
 # ====================================
@@ -144,6 +146,96 @@ def has_tipo_cfe(root):
     return False
 
 # ====================================
+# EXTRAER XML RECURSIVO
+# ====================================
+
+def extract_xml_files_from_zip(
+    zip_file,
+    password="",
+    depth=0
+):
+
+    if depth > MAX_ZIP_DEPTH:
+        return
+
+    try:
+
+        for file_info in zip_file.infolist():
+
+            filename = file_info.filename
+
+            lower_name = filename.lower()
+
+            # ZIP Slip
+            if ".." in filename:
+                continue
+
+            # ====================================
+            # XML
+            # ====================================
+
+            if lower_name.endswith(".xml"):
+
+                try:
+
+                    with zip_file.open(
+                        file_info,
+                        pwd=password.encode()
+                        if password
+                        else None
+                    ) as source:
+
+                        xml_bytes = source.read()
+
+                    yield (
+                        Path(filename).name,
+                        xml_bytes
+                    )
+
+                except Exception:
+                    continue
+
+            # ====================================
+            # ZIP INTERNO
+            # ====================================
+
+            elif lower_name.endswith(".zip"):
+
+                try:
+
+                    with zip_file.open(
+                        file_info,
+                        pwd=password.encode()
+                        if password
+                        else None
+                    ) as nested_zip_file:
+
+                        nested_zip_bytes = (
+                            nested_zip_file.read()
+                        )
+
+                    nested_zip_buffer = BytesIO(
+                        nested_zip_bytes
+                    )
+
+                    with zipfile.ZipFile(
+                        nested_zip_buffer,
+                        'r'
+                    ) as nested_zip:
+
+                        yield from extract_xml_files_from_zip(
+                            nested_zip,
+                            password=password,
+                            depth=depth + 1
+                        )
+
+                except Exception:
+                    continue
+
+    except Exception:
+        return
+
+# ====================================
 # CLASIFICADOR
 # ====================================
 
@@ -159,15 +251,13 @@ def classify_xml(xml_bytes, rut):
         )
 
         lower_xml = xml_text.lower()
-        
+
         # ====================================
-        # REPORTES DGI
+        # REPORTES
         # ====================================
 
         if "<reporte" in lower_xml:
-            return "otros"                
-        
-        
+            return "otros"
 
         # ====================================
         # SOAP DGI
@@ -181,8 +271,9 @@ def classify_xml(xml_bytes, rut):
             return "soap_dgi"
 
         # ====================================
-        # DETECTAR SOBRES
+        # SOBRES
         # ====================================
+
         is_sobre = (
             "enviocfe_entreempresas" in lower_xml
             or "<enviocfe" in lower_xml
@@ -202,14 +293,12 @@ def classify_xml(xml_bytes, rut):
 
         for tag_name, value in ruts:
 
-            # EMISOR
             if tag_name in [
                 "rucemisor",
                 "rutemisor"
             ]:
                 emisor = value
 
-            # RECEPTOR
             if tag_name in [
                 "rucrecep",
                 "rutrecep",
@@ -224,26 +313,21 @@ def classify_xml(xml_bytes, rut):
 
         if is_sobre:
 
-            # SOBRE EMITIDO
             if emisor == rut:
                 return "sobres_emitidos"
 
-            # SOBRE RECIBIDO
             if receptor == rut:
                 return "sobres_recibidos"
 
-            # Fallback
             return "sobres_recibidos"
 
         # ====================================
         # CFE DIRECTOS
         # ====================================
 
-        # EMITIDOS
         if emisor == rut:
             return "emitidos"
 
-        # RECIBIDOS
         if receptor == rut:
             return "recibidos"
 
@@ -337,7 +421,7 @@ async def upload_zip(
             )
 
         # ====================================
-        # LEER ZIP
+        # LEER ZIP RECURSIVO
         # ====================================
 
         xml_entries = []
@@ -349,26 +433,12 @@ async def upload_zip(
                 'r'
             ) as zip_ref:
 
-                for file_info in zip_ref.infolist():
-
-                    # ZIP Slip protection
-                    if ".." in file_info.filename:
-
-                        return JSONResponse(
-                            status_code=400,
-                            content={
-                                "error":
-                                "ZIP inseguro"
-                            }
-                        )
-
-                    if file_info.filename.lower().endswith(
-                        '.xml'
-                    ):
-
-                        xml_entries.append(
-                            file_info
-                        )
+                xml_entries = list(
+                    extract_xml_files_from_zip(
+                        zip_ref,
+                        password=password
+                    )
+                )
 
         except zipfile.BadZipFile:
 
@@ -441,110 +511,73 @@ async def upload_zip(
 
         try:
 
-            with zipfile.ZipFile(
-                input_zip_path,
-                'r'
-            ) as input_zip:
+            for original_name, xml_bytes in xml_entries:
 
-                for xml_file in xml_entries:
+                # ====================================
+                # CLASIFICAR
+                # ====================================
 
-                    original_name = Path(
-                        xml_file.filename
-                    ).name
+                category = classify_xml(
+                    xml_bytes,
+                    rut
+                )
 
-                    try:
+                # ====================================
+                # VALIDAR RUT
+                # ====================================
 
-                        with input_zip.open(
-                            xml_file,
-                            pwd=password.encode() if password else None
-                        ) as source:
+                if category in [
+                    "emitidos",
+                    "recibidos",
+                    "sobres_emitidos",
+                    "sobres_recibidos"
+                ]:
 
-                            xml_bytes = source.read()
+                    rut_match_count += 1
 
-                    except RuntimeError:
+                final_name = original_name
 
-                        return JSONResponse(
-                            status_code=400,
-                            content={
-                                "error":
-                                (
-                                    "El ZIP está protegido "
-                                    "con contraseña incorrecta "
-                                    "o no proporcionada"
-                                )
-                            }
-                    )
+                # ====================================
+                # DUPLICADOS
+                # ====================================
 
-                        xml_bytes = source.read()
+                if (
+                    final_name.lower()
+                    in used_names[category]
+                ):
 
-                    # ====================================
-                    # CLASIFICAR
-                    # ====================================
-
-                    category = classify_xml(
-                        
-                        xml_bytes,
-                        rut
-                    )
-                    
-
-                    # ====================================
-                    # VALIDAR RUT
-                    # ====================================
-                    
-                                        
-
-                    if category in [
-                        "emitidos",
-                        "recibidos",
-                        "sobres_emitidos",
-                        "sobres_recibidos"
-                    ]:
-                        rut_match_count += 1
-
-                    final_name = original_name
-
-                    # ====================================
-                    # DUPLICADOS
-                    # ====================================
-
-                    if (
+                    used_names[category][
                         final_name.lower()
-                        in used_names[category]
-                    ):
+                    ] += 1
 
-                        used_names[category][
-                            final_name.lower()
-                        ] += 1
+                    stem = Path(
+                        final_name
+                    ).stem
 
-                        stem = Path(
-                            final_name
-                        ).stem
+                    suffix = Path(
+                        final_name
+                    ).suffix
 
-                        suffix = Path(
-                            final_name
-                        ).suffix
-
-                        final_name = (
-                            f"{stem}_"
-                            f"{used_names[category][final_name.lower()]}"
-                            f"{suffix}"
-                        )
-
-                    else:
-
-                        used_names[category][
-                            final_name.lower()
-                        ] = 0
-
-                    # ====================================
-                    # GUARDAR XML
-                    # ====================================
-
-                    zip_map[category].writestr(
-                        final_name,
-                        xml_bytes
+                    final_name = (
+                        f"{stem}_"
+                        f"{used_names[category][final_name.lower()]}"
+                        f"{suffix}"
                     )
+
+                else:
+
+                    used_names[category][
+                        final_name.lower()
+                    ] = 0
+
+                # ====================================
+                # GUARDAR XML
+                # ====================================
+
+                zip_map[category].writestr(
+                    final_name,
+                    xml_bytes
+                )
 
         finally:
 
@@ -563,8 +596,7 @@ async def upload_zip(
                     "error":
                     (
                         "El RUT ingresado no coincide "
-                        "con los documentos emitidos "
-                        "del ZIP"
+                        "con los documentos del ZIP"
                     )
                 }
             )
