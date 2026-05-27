@@ -239,7 +239,7 @@ def extract_xml_files_from_zip(
 # CLASIFICADOR
 # ====================================
 
-def classify_xml(xml_bytes, rut):
+def classify_xml(xml_bytes, rut):        
 
     try:
 
@@ -253,10 +253,13 @@ def classify_xml(xml_bytes, rut):
         lower_xml = xml_text.lower()
 
         # ====================================
-        # REPORTES
+        # REPORTES DGI
         # ====================================
 
-        if "<reporte" in lower_xml:
+        if (
+            "<reporte" in lower_xml
+            or "efacrecepcionreporte" in lower_xml
+        ):        
             return "otros"
 
         # ====================================
@@ -331,14 +334,6 @@ def classify_xml(xml_bytes, rut):
         if receptor == rut:
             return "recibidos"
 
-        # ====================================
-        # FALLBACK CFE
-        # ====================================
-
-        if has_tipo_cfe(root):
-
-            if emisor != rut:
-                return "recibidos"
 
         # ====================================
         # OTROS
