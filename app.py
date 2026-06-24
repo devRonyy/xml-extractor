@@ -41,7 +41,7 @@ templates = Jinja2Templates(
     directory=str(BASE_DIR / "templates")
 )
 
-MAX_FILE_SIZE_MB = 80
+MAX_FILE_SIZE_MB = 250
 MAX_ZIP_DEPTH = 5
 ALLOWED_EXTENSION = ".zip"
 
