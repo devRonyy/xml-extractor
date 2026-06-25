@@ -10,19 +10,36 @@
 
 <div class="container">
 
-    <h1>Extractor XML</h1>
+    <h1>📦 Extractor XML</h1>
 
 
-    <p>
-        El sistema clasificará automáticamente:
+    <p class="subtitle">
+    El sistema clasificará automáticamente los documentos encontrados:
     </p>
 
-    <ul>
-        <li>EMITIDOS</li>
-        <li>RECIBIDOS</li>
-        <li>SOBRES</li>
-        <li>OTROS</li>
-    </ul>
+<div class="features">
+
+    <div class="feature-card">
+        <span class="icon">📤</span>
+        <span>Emitidos</span>
+    </div>
+
+    <div class="feature-card">
+        <span class="icon">📥</span>
+        <span>Recibidos</span>
+    </div>
+
+    <div class="feature-card">
+        <span class="icon">📦</span>
+        <span>Sobres</span>
+    </div>
+
+    <div class="feature-card">
+        <span class="icon">📄</span>
+        <span>Otros</span>
+    </div>
+
+</div>
 
     <form
         id="uploadForm"
@@ -31,27 +48,27 @@
         enctype="multipart/form-data"
     >
 
-        <h3>Asegúrate de estar colocando el RUT correcto del cliente.</h3>
+        
+<p><strong>Completar solo si los XML están protegidos por una clave.</strong></p>
 
-        <br><br>
 
     <label for="password">
-    Contraseña ZIP (opcional):
+    🔒Contraseña ZIP (opcional):
     </label>
    
 
 <input
     type="password"
     name="password"
-    id="password"
->
+    id="password">
 
- <p><strong>Esto solo completar si los XML están protegidos por una clave.</strong></p>
 
-<br><br>
+     
+     <h3>Asegúrate de estar colocando el RUT correcto del cliente.</h3>
+     
 
         <label for="rut">
-            RUT empresa:
+            <strong>RUT empresa:</strong>
         </label>
 
         <input
@@ -61,21 +78,28 @@
             required
         >
 
-        <br><br>
+        
 
-        <label for="file">
-            Archivo ZIP:
-        </label>
+        <label> 📁 Archivo ZIP: </label>
 
-        <input
-            type="file"
-            name="file"
-            id="file"
-            accept=".zip"
-            required
-        >
+    <div class="file-upload">
 
-        <br><br>
+    <label for="file" class="file-button">
+        Seleccionar archivo
+    </label>
+
+    <span id="fileName">
+        Ningún archivo seleccionado
+    </span>
+
+    <input
+        type="file"
+        name="file"
+        id="file"
+        accept=".zip"
+        required>
+
+        
 
         <button
             type="submit"
@@ -84,7 +108,26 @@
             Procesar ZIP
         </button>
 
+        <h3> ℹ️ Con archivos grandes el proceso puede demorar un poco más.</h3>
+
     </form>
+
+    </form>
+
+<div class="footer">
+
+    XML Extractor <strong>v1.1</strong>
+
+    <span class="separator">•</span>
+
+    Desarrollado por <strong>Rony Silva</strong>
+
+</div>
+
+<div
+    id="loading"
+    style="display:none;"
+>
 
     <div
         id="loading"
@@ -93,17 +136,41 @@
 
         <div class="spinner"></div>
 
-        <p>
+        <p id="loadingText">
             Procesando archivos...
         </p>
 
     </div>
+
 
 </div>
 
 <script>
 
 const form = document.getElementById("uploadForm");
+
+const fileInput = document.getElementById("file");
+
+fileInput.addEventListener("change", () => {
+
+    const fileName =
+        document.getElementById("fileName");
+
+    if (fileInput.files.length > 0){
+
+        fileName.innerText =
+            fileInput.files[0].name;
+
+    }
+    else{
+
+        fileName.innerText =
+            "Ningún archivo seleccionado";
+
+    }
+
+});
+
 
 form.addEventListener("submit", async (e) => {
 
@@ -117,6 +184,10 @@ form.addEventListener("submit", async (e) => {
 
     document.getElementById("submitBtn").innerText =
         "Procesando...";
+    
+    document.getElementById("loadingText").innerText = "Procesando archivos...";    
+
+    
 
     const formData = new FormData(form);
 
@@ -146,9 +217,11 @@ form.addEventListener("submit", async (e) => {
         // DESCARGA
         const blob = await response.blob();
 
-        const url = window.URL.createObjectURL(blob);
+        const url =
+            window.URL.createObjectURL(blob);
 
-        const a = document.createElement("a");
+        const a =
+            document.createElement("a");
 
         a.href = url;
 
@@ -159,35 +232,47 @@ form.addEventListener("submit", async (e) => {
 
         let filename = "resultado.zip";
 
-if (contentDisposition) {
+        if (contentDisposition) {
 
-    // filename*=UTF-8''
-    let match = contentDisposition.match(
-        /filename\*=UTF-8''(.+)/
-    );
+            let match =
+                contentDisposition.match(
+                    /filename\*=UTF-8''(.+)/
+                );
 
-    if (match && match[1]) {
+            if (
+                match &&
+                match[1]
+            ) {
 
-        filename = decodeURIComponent(
-            match[1]
-        );
+                filename =
+                    decodeURIComponent(
+                        match[1]
+                    );
 
-    } else {
+            } else {
 
-        // filename=""
-        match = contentDisposition.match(
-            /filename="?([^"]+)"?/
-        );
+                match =
+                    contentDisposition.match(
+                        /filename="?([^"]+)"?/
+                    );
 
-        if (match && match[1]) {
-            filename = match[1];
+                if (
+                    match &&
+                    match[1]
+                ) {
+                    filename =
+                        match[1];
+                }
+            }
         }
-    }
-}
 
-if (!filename.toLowerCase().endsWith(".zip")) {
-    filename += ".zip";
-}
+        if (
+            !filename
+                .toLowerCase()
+                .endsWith(".zip")
+        ) {
+            filename += ".zip";
+        }
 
         a.download = filename;
 
@@ -211,6 +296,7 @@ if (!filename.toLowerCase().endsWith(".zip")) {
 
     finally {
 
+
         document.getElementById("loading").style.display =
             "none";
 
@@ -219,7 +305,10 @@ if (!filename.toLowerCase().endsWith(".zip")) {
 
         document.getElementById("submitBtn").innerText =
             "Procesar ZIP";
-    }
+
+        document.getElementById("loadingText").innerText = "Procesando archivos...";
+
+        }
 
 });
 

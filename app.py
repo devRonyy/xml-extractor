@@ -29,6 +29,11 @@ app = FastAPI(
     title="XML Flatten ZIP Extractor"
 )
 
+# ====================================
+# PROGRESO
+# ====================================
+
+
 app.mount(
     "/static",
     StaticFiles(
@@ -420,6 +425,9 @@ async def upload_zip(
         # ====================================
 
         xml_entries = []
+        
+        
+        
 
         try:
 
@@ -444,7 +452,8 @@ async def upload_zip(
                     "ZIP corrupto"
                 }
             )
-
+        
+        
         if not xml_entries:
 
             return JSONResponse(
@@ -505,9 +514,9 @@ async def upload_zip(
         # ====================================
 
         try:
-
+            
             for original_name, xml_bytes in xml_entries:
-
+                
                 # ====================================
                 # CLASIFICAR
                 # ====================================
@@ -629,12 +638,14 @@ async def upload_zip(
                         path,
                         arcname=path.name
                     )
+                    
+      
 
-    return FileResponse(
-        path=final_zip_path,
-        filename=final_zip_name,
-        media_type='application/zip'
-    )
+        return FileResponse(
+            path=final_zip_path,
+            filename=final_zip_name,
+            media_type='application/zip'
+        )
 
 # ====================================
 # HEALTH
@@ -646,3 +657,4 @@ async def health():
     return {
         "status": "ok"
     }
+    
