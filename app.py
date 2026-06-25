@@ -9,6 +9,8 @@ import shutil
 from tempfile import NamedTemporaryFile
 from pathlib import Path
 from io import BytesIO
+from datetime import datetime
+
 import sys
 import xml.etree.ElementTree as ET
 
@@ -293,6 +295,16 @@ def classify_xml(xml_bytes, rut):
         # ====================================
 
         root = ET.fromstring(xml_bytes)
+        
+        estado = root.find(".//{http://cfe.dgi.gub.uy}Estado")
+
+        if estado is not None:
+
+            valor = (estado.text or "").strip().upper()
+
+            if valor == "ANULADO":
+                return "anulados"
+            
 
         ruts = extract_possible_ruts(root)
 
@@ -485,7 +497,10 @@ async def upload_zip(
                 temp_path / "SOAP_DGI.zip",
 
             "otros":
-                temp_path / "OTROS.zip"
+                temp_path / "OTROS.zip",
+                
+            "anulados":
+                temp_path / "ANULADOS.zip"    
         }
 
         zip_map = {}
@@ -515,8 +530,29 @@ async def upload_zip(
 
         try:
             
+            estadisticas = {
+
+               "emitidos": 0,
+
+               "recibidos": 0,
+
+               "sobres_emitidos": 0,
+
+               "sobres_recibidos": 0,
+
+               "soap_dgi": 0,
+
+               "otros": 0,
+
+               "anulados": 0
+
+           }
+            
             for original_name, xml_bytes in xml_entries:
                 
+                
+                
+
                 # ====================================
                 # CLASIFICAR
                 # ====================================
@@ -525,6 +561,9 @@ async def upload_zip(
                     xml_bytes,
                     rut
                 )
+                
+                
+                
 
                 # ====================================
                 # VALIDAR RUT
@@ -538,6 +577,8 @@ async def upload_zip(
                 ]:
 
                     rut_match_count += 1
+                 
+                estadisticas[category] += 1    
 
                 final_name = original_name
 
@@ -582,8 +623,66 @@ async def upload_zip(
                     final_name,
                     xml_bytes
                 )
+                
+                
+            fecha = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+            xml_exportados = sum(estadisticas.values())
+
+            resumen = f"""
+            ==========================================================
+            RESUMEN DEL PROCESAMIENTO
+            ==========================================================
+
+            Fecha:
+            {fecha}
+
+            RUT procesado:
+            {rut}
+
+            ----------------------------------------------------------
+
+            XML encontrados:          {len(xml_entries)}
+
+            Emitidos:                 {estadisticas["emitidos"]}
+
+            Recibidos:                {estadisticas["recibidos"]}
+
+            Sobres emitidos:          {estadisticas["sobres_emitidos"]}
+
+            Sobres recibidos:         {estadisticas["sobres_recibidos"]}
+
+            SOAP DGI:                 {estadisticas["soap_dgi"]}
+
+            Otros:                    {estadisticas["otros"]}
+
+            Anulados:                 {estadisticas["anulados"]}
+
+            ----------------------------------------------------------
+
+            Total XML procesados:     {xml_exportados}
+
+            ==========================================================
+
+            Procesado correctamente.
+
+            XML Extractor v1.2
+            """    
 
         finally:
+            
+            print()
+
+            print("========== RESUMEN ==========")
+
+            for k, v in estadisticas.items():
+
+                print(f"{k:20}: {v}")
+
+            print("=============================")
+
+            print()
+            
 
             for z in zip_map.values():
                 z.close()
@@ -628,6 +727,7 @@ async def upload_zip(
             final_zip_path,
             'w',
             zipfile.ZIP_DEFLATED
+            
         ) as final_zip:
 
             for path in categories.values():
@@ -638,7 +738,10 @@ async def upload_zip(
                         path,
                         arcname=path.name
                     )
-                    
+            final_zip.writestr (
+             "RESUMEN_PROCESAMIENTO.txt",
+               resumen
+            )            
       
 
         return FileResponse(
