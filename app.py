@@ -265,8 +265,9 @@ def classify_xml(xml_bytes, rut):
 
         if (
             "<reporte" in lower_xml
+            or ":reporte" in lower_xml
             or "efacrecepcionreporte" in lower_xml
-        ):        
+        ):
             return "otros"
 
         # ====================================
